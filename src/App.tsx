@@ -13,7 +13,7 @@ const BrandingHeader: React.FC = () => (
   </div>
 );
 
-const API = 'http://127.0.0.1:5000';
+const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
 
 const App: React.FC = () => {
   // --- Auth ---
@@ -82,6 +82,8 @@ const App: React.FC = () => {
   };
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   // Load progress from DB when user logs in
   const loadProgressFromDB = async (userId: number) => {
@@ -149,7 +151,7 @@ const App: React.FC = () => {
 
   const speakQuestion = async (text: string) => {
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/tts', {
+      const response = await fetch(`${API}/api/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text })
@@ -167,43 +169,63 @@ const App: React.FC = () => {
 
   const startRecording = async () => {
     try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.start();
       setIsRecording(true);
       setTranscribedText('Recording Answer...');
       setFinalTranscript('');
-      
-      await fetch('http://127.0.0.1:5000/api/start_record', {
-        method: 'POST'
-      });
     } catch (error) {
       console.error("Start recording error:", error);
       setIsRecording(false);
-      alert("Failed to start recording. Ensure the Python backend is running.");
+      alert("Microphone access denied or error occurred.");
     }
   };
 
   const stopRecording = async () => {
-    try {
+    if (!mediaRecorderRef.current) return;
+
+    mediaRecorderRef.current.onstop = async () => {
       setIsRecording(false);
       setTranscribedText('Transcribing your answer...');
-      
-      const response = await fetch('http://127.0.0.1:5000/api/stop_record', {
-        method: 'POST'
-      });
-      const data = await response.json();
-      
-      if (data.text) {
-        setFinalTranscript(data.text);
-      } else if (data.error) {
-        setFinalTranscript(`(Transcription failed: ${data.error})`);
-      } else {
-        setFinalTranscript("No speech detected.");
+
+      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.webm');
+
+      try {
+        const response = await fetch(`${API}/api/upload_audio`, {
+          method: 'POST',
+          body: formData,
+        });
+        const data = await response.json();
+        
+        if (data.text) {
+          setFinalTranscript(data.text);
+        } else if (data.error) {
+          setFinalTranscript(`(Transcription failed: ${data.error})`);
+        } else {
+          setFinalTranscript("No speech detected.");
+        }
+      } catch (error) {
+        console.error("Upload error:", error);
+        setFinalTranscript("(Connection error - Check backend)");
+      } finally {
+        setTranscribedText('');
       }
-      setTranscribedText('');
-    } catch (error) {
-      console.error("Stop recording error:", error);
-      setFinalTranscript("(Connection error - Check backend)");
-      setTranscribedText('');
-    }
+    };
+
+    mediaRecorderRef.current.stop();
+    mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
   };
 
   // --- Auth handlers ---
@@ -285,7 +307,7 @@ const App: React.FC = () => {
     setLastEvaluation(null);
     
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/get_next_question', {
+      const response = await fetch(`${API}/api/get_next_question`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domain: category.title, history: [] })
@@ -334,7 +356,7 @@ const App: React.FC = () => {
     setHistory(updatedHistory);
 
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/get_next_question', {
+      const response = await fetch(`${API}/api/get_next_question`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domain: selectedCategory.title, history: updatedHistory })
@@ -398,7 +420,7 @@ const App: React.FC = () => {
     setSelectedAnswer(null);
 
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/generate_mcqs', {
+      const response = await fetch(`${API}/api/generate_mcqs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic: selectedPrepTopic.title })
