@@ -149,21 +149,21 @@ const App: React.FC = () => {
     }
   }, [currentPage, currentQuestionIndex, currentQuestion]);
 
-  const speakQuestion = async (text: string) => {
-    try {
-      const response = await fetch(`${API}/api/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-      });
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      if (audioRef.current) {
-        audioRef.current.src = url;
-        audioRef.current.play();
-      }
-    } catch (error) {
-      console.error("TTS Error:", error);
+  const speakQuestion = (text: string) => {
+    if ('speechSynthesis' in window) {
+      // Stop anything that's already playing
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      // Optional: You can tweak these to make it sound more natural
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      
+      window.speechSynthesis.speak(utterance);
+    } else {
+      console.error("Speech Synthesis is not supported in your browser.");
     }
   };
 

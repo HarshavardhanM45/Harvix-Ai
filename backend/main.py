@@ -10,7 +10,10 @@ from flask_cors import CORS
 from gtts import gTTS
 import speech_recognition as sr
 from pydub import AudioSegment
-import google.generativeai as genai
+import imageio_ffmpeg
+
+# Force pydub to use the bundled ffmpeg binary (fixes WinError 2 on Windows)
+AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
 
 # --- PostgreSQL ---
 from db import init_db
@@ -89,10 +92,12 @@ def upload_audio():
         # Save the raw uploaded file (usually webm from frontend)
         file.save(filepath)
         
-        # Convert to WAV using pydub, as Google SpeechRecognition requires standard PCM WAV
-        audio = AudioSegment.from_file(filepath)
+        # Convert to WAV using bundled ffmpeg directly (bypassing pydub and missing ffprobe completely)
         wav_filepath = filepath + ".wav"
-        audio.export(wav_filepath, format="wav")
+        import subprocess
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        subprocess.run([ffmpeg_exe, "-y", "-i", filepath, wav_filepath], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         # Transcribe with SpeechRecognition
         recognizer = sr.Recognizer()
@@ -121,15 +126,19 @@ def process_answer():
     # Here you could add AI evaluation logic in the future
     return jsonify({"processed_text": text})
 
-import google.generativeai as genai
+from google import genai
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # Configure Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+gemini_client = None
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+    try:
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    except Exception as e:
+        print(f"Gemini client setup failed: {e}")
 
 # Configure Fallbacks
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
@@ -216,16 +225,19 @@ def call_together(prompt):
         return None, f"Together AI Call Failed: {str(e)}"
 
 def call_gemini(prompt, models_to_try=[
-    'gemini-2.0-pro-exp-02-05', 'gemini-2.0-flash-exp', 'gemini-2.0-flash', 
-    'gemini-2.0-flash-lite-preview-02-05', 'gemini-2.5-flash', 'gemini-1.5-pro', 
-    'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-pro', 'gemini-1.0-pro'
+    'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash'
 ]):
-    """Helper to try multiple Gemini models with fallback and a small delay on quota hit."""
+    """Helper to try multiple Gemini models using the new genai SDK."""
+    if not gemini_client:
+        return None, "Gemini Client not initialized (Missing API Key)."
+        
     for model_name in models_to_try:
         try:
             print(f"Calling Gemini with model: {model_name}")
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
+            response = gemini_client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
             text = response.text.strip()
             
             if "```json" in text:
@@ -239,6 +251,7 @@ def call_gemini(prompt, models_to_try=[
             print(f"Gemini call failed with {model_name}: {error_msg}")
             if "429" in error_msg:
                 print("Quota limit hit. Sleeping for 2 seconds before trying next model...")
+                import time
                 time.sleep(2)
                 continue
     return None, "All 10+ Gemini models failed or Quota exceeded."

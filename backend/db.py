@@ -12,7 +12,8 @@ if os.path.exists(_env_path):
             _line = _line.strip()
             if _line and "=" in _line and not _line.startswith("#"):
                 _k, _v = _line.split("=", 1)
-                os.environ.setdefault(_k.strip(), _v.strip())
+                # Strip spaces and quotes from the value so int() doesn't crash
+                os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
 # ---------------------------------------------------------------------------
 # Connection config — values come from .env or env vars (set before import)
