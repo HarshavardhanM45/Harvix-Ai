@@ -794,7 +794,7 @@ const App: React.FC = () => {
                       </div>
                       <div className="flex flex-wrap justify-center md:justify-start gap-5">
                         {topic.subtasks.map((sub, idx) => (
-                          <span key={idx} className="text-[11px] font-black uppercase tracking-widest text-[var(--color-text-dim)] bg-[var(--color-card-bg)] px-4 py-1.5 rounded-xl border border-[var(--color-card-border)]">
+                          <span key={idx} className={`text-[11px] font-black uppercase tracking-widest px-4 py-1.5 rounded-xl border ${isCompleted ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-[var(--color-text-dim)] bg-[var(--color-card-bg)] border-[var(--color-card-border)]'}`}>
                             {sub}
                           </span>
                         ))}
