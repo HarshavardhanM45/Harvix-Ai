@@ -4,9 +4,7 @@ import uuid
 import json
 import random
 import threading
-import numpy as np
-import sounddevice as sd
-from scipy.io.wavfile import write
+
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 from gtts import gTTS
@@ -73,84 +71,32 @@ def save_persistent_question(question):
     except Exception as e:
         print(f"Error saving persistent question: {e}")
 
-# Global variables for recording
-recording_active = False
-audio_buffer = []
-recording_active = False
-audio_buffer = []
-
-def record_audio_callback(indata, frames, time, status):
-    """Callback for sounddevice InputStream."""
-    if recording_active:
-        audio_buffer.append(indata.copy())
-
-@app.route('/api/tts', methods=['POST'])
-def text_to_speech():
-    """Converts text to speech and returns the audio file."""
-    data = request.json
-    text = data.get('text', '')
-    if not text:
-        return jsonify({"error": "No text provided"}), 400
-
-    filename = f"{uuid.uuid4()}.mp3"
-    filepath = os.path.join(AUDIO_FOLDER, filename)
+@app.route('/api/upload_audio', methods=['POST'])
+def upload_audio():
+    """Receives recorded audio from the frontend, converts it, and transcribes it."""
+    if 'audio' not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+    
+    file = request.files['audio']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+        
+    filename = f"{uuid.uuid4()}_{file.filename}"
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    wav_filepath = None
     
     try:
-        tts = gTTS(text=text, lang='en')
-        tts.save(filepath)
-        return send_file(filepath, mimetype='audio/mpeg')
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/start_record', methods=['POST'])
-def start_record():
-    global recording_active, audio_buffer
-    if recording_active:
-        return jsonify({"message": "Recording already in progress"}), 400
-    
-    recording_active = True
-    audio_buffer = []
-    
-    def run_recording():
-        fs = 44100  # Sample rate
-        with sd.InputStream(samplerate=fs, channels=1, callback=record_audio_callback):
-            while recording_active:
-                sd.sleep(100)
-
-    threading.Thread(target=run_recording, daemon=True).start()
-    return jsonify({"message": "Recording started"}), 200
-
-@app.route('/api/stop_record', methods=['POST'])
-def stop_record():
-    global recording_active, audio_buffer
-    if not recording_active:
-        return jsonify({"error": "No recording in progress"}), 400
-    
-    recording_active = False
-    # Give a tiny bit of time for callback to finish any pending chunk
-    import time
-    time.sleep(0.5)
-    
-    if not audio_buffer:
-        return jsonify({"error": "No audio data captured"}), 400
-    
-    try:
-        # Combine all audio chunks
-        full_audio = np.concatenate(audio_buffer, axis=0)
+        # Save the raw uploaded file (usually webm from frontend)
+        file.save(filepath)
         
-        # Convert float32 [-1.0, 1.0] to int16 [-32768, 32767] for compatibility
-        if full_audio.dtype == np.float32:
-            full_audio = (full_audio * 32767).astype(np.int16)
+        # Convert to WAV using pydub, as Google SpeechRecognition requires standard PCM WAV
+        audio = AudioSegment.from_file(filepath)
+        wav_filepath = filepath + ".wav"
+        audio.export(wav_filepath, format="wav")
         
-        filename = f"{uuid.uuid4()}.wav"
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        
-        # Save as WAV using scipy (16-bit PCM)
-        write(filepath, 44100, full_audio)
-        
-        # Transcribe
+        # Transcribe with SpeechRecognition
         recognizer = sr.Recognizer()
-        with sr.AudioFile(filepath) as source:
+        with sr.AudioFile(wav_filepath) as source:
             audio_data = recognizer.record(source)
             text = recognizer.recognize_google(audio_data)
         
@@ -158,11 +104,14 @@ def stop_record():
     except sr.UnknownValueError:
         return jsonify({"text": "", "error": "Speech was unintelligible"}), 200
     except Exception as e:
+        print(f"Transcription error: {e}")
         return jsonify({"error": str(e)}), 500
     finally:
-        # Cleanup
-        if 'filepath' in locals() and os.path.exists(filepath):
+        # Cleanup temporary audio files
+        if os.path.exists(filepath):
             os.remove(filepath)
+        if wav_filepath and os.path.exists(wav_filepath):
+            os.remove(wav_filepath)
 
 @app.route('/api/process', methods=['POST'])
 def process_answer():
