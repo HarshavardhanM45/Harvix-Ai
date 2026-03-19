@@ -48,8 +48,6 @@ const App: React.FC = () => {
   const [completedTopics, setCompletedTopics] = useState<string[]>([]);
   const [completedHomeworks, setCompletedHomeworks] = useState<{ [key: string]: boolean[] }>({});
   const [selectedPrepTopic, setSelectedPrepTopic] = useState<PrepTopic | null>(null);
-  const [navigationStack, setNavigationStack] = useState<string[]>([]);
-  
   // Quiz State
   const [activeQuiz, setActiveQuiz] = useState<MCQ[] | null>(null);
   const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
@@ -59,7 +57,6 @@ const App: React.FC = () => {
   const [loadingQuiz, setLoadingQuiz] = useState(false);
 
   const navigateTo = (page: string) => {
-    setNavigationStack(prev => [...prev, currentPage]);
     setCurrentPage(page);
     // Push to browser history so back/forward buttons work
     window.history.pushState({ page }, '', `#${page}`);
@@ -90,13 +87,6 @@ const App: React.FC = () => {
       const page = event.state?.page;
       if (page) {
         setCurrentPage(page);
-        // Update the navigation stack — pop last entry when going back
-        setNavigationStack(prev => {
-          if (prev.length > 0) {
-            return prev.slice(0, -1);
-          }
-          return prev;
-        });
         // Reset quiz state
         setActiveQuiz(null);
         setCurrentQuizIndex(0);
@@ -334,7 +324,6 @@ const App: React.FC = () => {
     setLoginEmail('');
     setLoginPassword('');
     setLoginName('');
-    setNavigationStack([]);
     setCurrentPage('login');
     setShowLogoutDialog(false);
   };
