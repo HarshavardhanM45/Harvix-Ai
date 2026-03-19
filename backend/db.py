@@ -43,10 +43,42 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id           SERIAL PRIMARY KEY,
-            username     VARCHAR(100) UNIQUE NOT NULL,
+            email        VARCHAR(100) UNIQUE NOT NULL,
+            name         VARCHAR(150) NOT NULL DEFAULT '',
             password_hash TEXT NOT NULL,
             created_at   TIMESTAMPTZ DEFAULT NOW()
         );
+    """)
+
+    # Migration: add 'name' column if it doesn't exist (for existing DBs)
+    cur.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'name'
+            ) THEN
+                ALTER TABLE users ADD COLUMN name VARCHAR(150) NOT NULL DEFAULT '';
+            END IF;
+        END
+        $$;
+    """)
+
+    # Migration: add 'email' column if 'username' exists but 'email' doesn't
+    cur.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'username'
+            ) AND NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'email'
+            ) THEN
+                ALTER TABLE users RENAME COLUMN username TO email;
+            END IF;
+        END
+        $$;
     """)
 
     # --- Module progress ---

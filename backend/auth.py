@@ -14,9 +14,12 @@ def register():
     data = request.get_json()
     email    = (data.get('email') or '').strip().lower()
     password = (data.get('password') or '').strip()
+    name     = (data.get('name') or '').strip()
 
     if not email or not password:
         return jsonify({"error": "Email and password are required."}), 400
+    if not name:
+        return jsonify({"error": "Name is required."}), 400
     if not EMAIL_RE.match(email):
         return jsonify({"error": "Please enter a valid email address."}), 400
     if len(password) < 6:
@@ -28,8 +31,8 @@ def register():
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id, email",
-            (email, pw_hash)
+            "INSERT INTO users (email, name, password_hash) VALUES (%s, %s, %s) RETURNING id, email, name",
+            (email, name, pw_hash)
         )
         row = cur.fetchone()
         conn.commit()
@@ -37,7 +40,7 @@ def register():
         conn.close()
         return jsonify({
             "message": "Account created successfully.",
-            "user": {"id": row[0], "email": row[1]}
+            "user": {"id": row[0], "email": row[1], "name": row[2]}
         }), 201
     except Exception as e:
         if "unique" in str(e).lower():
@@ -59,7 +62,7 @@ def login():
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, email, password_hash FROM users WHERE email = %s",
+            "SELECT id, email, name, password_hash FROM users WHERE email = %s",
             (email,)
         )
         row = cur.fetchone()
@@ -69,15 +72,14 @@ def login():
         if not row:
             return jsonify({"error": "Invalid email or password."}), 401
 
-        user_id, db_email, pw_hash = row
+        user_id, db_email, db_name, pw_hash = row
         if not check_password_hash(pw_hash, password):
             return jsonify({"error": "Invalid email or password."}), 401
 
         return jsonify({
             "message": "Login successful.",
-            "user": {"id": user_id, "email": db_email}
+            "user": {"id": user_id, "email": db_email, "name": db_name or db_email.split('@')[0]}
         }), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-

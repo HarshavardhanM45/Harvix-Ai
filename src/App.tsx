@@ -17,7 +17,7 @@ const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
 
 const App: React.FC = () => {
   // --- Auth ---
-  const [currentUser, setCurrentUser] = useState<{ id: number; email: string } | null>(() => {
+  const [currentUser, setCurrentUser] = useState<{ id: number; email: string; name: string } | null>(() => {
     const saved = localStorage.getItem('harvix_user');
     return saved ? JSON.parse(saved) : null;
   });
@@ -25,6 +25,8 @@ const App: React.FC = () => {
   const [authLoading, setAuthLoading] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [loginName, setLoginName] = useState('');
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false);
 
   const [currentPage, setCurrentPage] = useState<string>(() => {
     const saved = localStorage.getItem('harvix_user');
@@ -59,6 +61,8 @@ const App: React.FC = () => {
   const navigateTo = (page: string) => {
     setNavigationStack(prev => [...prev, currentPage]);
     setCurrentPage(page);
+    // Push to browser history so back/forward buttons work
+    window.history.pushState({ page }, '', `#${page}`);
     window.scrollTo(0, 0);
     // Reset quiz state when navigating
     setActiveQuiz(null);
@@ -70,16 +74,43 @@ const App: React.FC = () => {
   };
 
   const goBack = () => {
-    if (navigationStack.length > 0) {
-      const prevStack = [...navigationStack];
-      const prevPage = prevStack.pop();
-      setNavigationStack(prevStack);
-      if (prevPage) setCurrentPage(prevPage);
-    } else {
-      setCurrentPage('portal');
-    }
-    window.scrollTo(0, 0);
+    // Use browser history so the back button stays in sync
+    window.history.back();
   };
+
+  // Set the initial browser history entry on mount
+  useEffect(() => {
+    const initialPage = localStorage.getItem('harvix_user') ? 'portal' : 'login';
+    window.history.replaceState({ page: initialPage }, '', `#${initialPage}`);
+  }, []);
+
+  // Listen for browser back/forward navigation
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      const page = event.state?.page;
+      if (page) {
+        setCurrentPage(page);
+        // Update the navigation stack — pop last entry when going back
+        setNavigationStack(prev => {
+          if (prev.length > 0) {
+            return prev.slice(0, -1);
+          }
+          return prev;
+        });
+        // Reset quiz state
+        setActiveQuiz(null);
+        setCurrentQuizIndex(0);
+        setQuizScore(0);
+        setQuizFinished(false);
+        setSelectedAnswer(null);
+        setLoadingQuiz(false);
+        window.scrollTo(0, 0);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -260,12 +291,16 @@ const App: React.FC = () => {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
+    if (!loginName.trim()) {
+      setAuthError('Please enter your name.');
+      return;
+    }
     setAuthLoading(true);
     try {
       const res = await fetch(`${API}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+        body: JSON.stringify({ email: loginEmail, password: loginPassword, name: loginName.trim() })
       });
       const data = await res.json();
       if (res.ok) {
@@ -275,6 +310,7 @@ const App: React.FC = () => {
         setCompletedTopics([]);
         setLoginEmail('');
         setLoginPassword('');
+        setLoginName('');
         navigateTo('portal');
       } else {
         setAuthError(data.error || 'Registration failed.');
@@ -287,14 +323,20 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+    setShowLogoutDialog(true);
+  };
+
+  const confirmLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('harvix_user');
     setCompletedHomeworks({});
     setCompletedTopics([]);
     setLoginEmail('');
     setLoginPassword('');
+    setLoginName('');
     setNavigationStack([]);
     setCurrentPage('login');
+    setShowLogoutDialog(false);
   };
 
   const startInterview = async (category: Category) => {
@@ -471,51 +513,108 @@ const App: React.FC = () => {
     <div className={`min-h-screen flex flex-col items-center justify-center p-6 transition-all duration-1000 ${isVisible ? 'opacity-100' : 'opacity-0'}`}>
       <audio ref={audioRef} hidden />
 
-      {/* Theme Toggle */}
-      <button 
-        onClick={toggleTheme}
-        className="fixed top-8 right-8 z-50 glass w-12 h-12 rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-[0_0_20px_rgba(0,0,0,0.3)] border border-white/10 group"
-        title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
-      >
-        <span className="text-xl transition-transform group-hover:rotate-12">
-          {theme === 'dark' ? '☀️' : '🌙'}
-        </span>
-        <div className="absolute inset-0 rounded-full bg-cyan-400/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-      </button>
-
-      {/* User pill + Logout — fixed top-left, shown when logged in */}
-      {currentUser && (
-        <div className="fixed top-6 left-6 z-50 flex items-center gap-3 animate-in fade-in slide-in-from-left-4 duration-500">
-          {/* User pill */}
-          <div className="glass flex items-center gap-3 pl-2 pr-4 py-2 rounded-full border border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.4)] backdrop-blur-xl">
-            {/* Avatar */}
-            <div className="relative w-8 h-8 flex-shrink-0">
-              <div className="absolute inset-0 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 opacity-20 blur-sm"></div>
-              <div className="relative w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/40 flex items-center justify-center font-black text-cyan-300 text-[11px] uppercase tracking-wider shadow-[0_0_12px_rgba(34,211,238,0.2)]">
-                {currentUser.email?.slice(0, 2)}
+      {/* Logout Confirmation Dialog */}
+      {showLogoutDialog && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={() => setShowLogoutDialog(false)}>
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300"></div>
+          {/* Dialog */}
+          <div 
+            className="relative glass p-10 rounded-[2.5rem] w-full max-w-sm shadow-[0_50px_100px_rgba(0,0,0,0.8)] border border-white/10 animate-in zoom-in-95 fade-in duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 via-orange-400 to-red-600"></div>
+            <div className="flex flex-col items-center text-center">
+              <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center mb-6">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 16.22a6.937 6.937 0 0 1-9.5 0 6.937 6.937 0 0 1 0-9.5" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v9" />
+                </svg>
+              </div>
+              <h3 className="text-2xl font-black text-[var(--color-text-main)] mb-2 uppercase tracking-tight">Confirm Logout</h3>
+              <p className="text-sm text-[var(--color-text-dim)] font-medium mb-8">Are you sure you want to end your session?</p>
+              <div className="flex gap-4 w-full">
+                <button 
+                  onClick={() => setShowLogoutDialog(false)}
+                  className="flex-1 py-4 rounded-2xl border border-white/10 glass text-[var(--color-text-main)] font-black uppercase tracking-widest text-xs hover:bg-white/5 transition-all active:scale-95"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmLogout}
+                  className="flex-1 py-4 rounded-2xl bg-gradient-to-r from-red-600 to-red-500 text-white font-black uppercase tracking-widest text-xs hover:from-red-500 hover:to-red-400 transition-all shadow-lg shadow-red-500/20 active:scale-95"
+                >
+                  Logout
+                </button>
               </div>
             </div>
-            {/* Email */}
-            <div className="flex flex-col min-w-0 hidden sm:flex">
-              <span className="text-[9px] font-black uppercase tracking-[0.3em] text-cyan-500/60 leading-none mb-0.5">Active Session</span>
-              <span className="text-[11px] font-bold text-[var(--color-text-main)] truncate max-w-[130px] leading-none">{currentUser.email}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Top bar: User pill (left) + Theme toggle & Logout (right) — fixed, shown when logged in */}
+      {currentUser && (
+        <>
+          {/* User pill — fixed top-left */}
+          <div className="fixed top-6 left-6 z-50 animate-in fade-in slide-in-from-left-4 duration-500">
+            <div className="glass flex items-center gap-3 pl-2 pr-4 py-2 rounded-full border border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.4)] backdrop-blur-xl">
+              {/* Avatar */}
+              <div className="relative w-8 h-8 flex-shrink-0">
+                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 opacity-20 blur-sm"></div>
+                <div className="relative w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/40 flex items-center justify-center font-black text-cyan-300 text-[11px] uppercase tracking-wider shadow-[0_0_12px_rgba(34,211,238,0.2)]">
+                  {currentUser.name?.slice(0, 2) || currentUser.email?.slice(0, 2)}
+                </div>
+              </div>
+              {/* Name */}
+              <div className="flex flex-col min-w-0 hidden sm:flex">
+                <span className="text-[9px] font-black uppercase tracking-[0.3em] text-cyan-500/60 leading-none mb-0.5">Active Session</span>
+                <span className="text-[11px] font-bold text-[var(--color-text-main)] truncate max-w-[130px] leading-none">{currentUser.name || currentUser.email}</span>
+              </div>
             </div>
           </div>
 
-          {/* Logout icon button — matches theme toggle style */}
-          <button
-            onClick={handleLogout}
-            title="Sign out"
-            className="glass w-10 h-10 rounded-full flex items-center justify-center border border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:border-red-500/40 hover:shadow-[0_0_20px_rgba(239,68,68,0.2)] hover:scale-110 active:scale-95 transition-all duration-300 group relative"
-          >
-            <div className="absolute inset-0 rounded-full bg-red-500/0 group-hover:bg-red-500/5 transition-colors duration-300"></div>
-            {/* Power / logout SVG icon */}
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-[var(--color-text-dim)] group-hover:text-red-400 transition-colors duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 16.22a6.937 6.937 0 0 1-9.5 0 6.937 6.937 0 0 1 0-9.5" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v9" />
-            </svg>
-          </button>
-        </div>
+          {/* Theme toggle + Logout — fixed top-right */}
+          <div className="fixed top-6 right-6 z-50 flex items-center gap-3 animate-in fade-in slide-in-from-right-4 duration-500">
+            {/* Theme Toggle */}
+            <button 
+              onClick={toggleTheme}
+              className="glass w-12 h-12 rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-[0_0_20px_rgba(0,0,0,0.3)] border border-white/10 group"
+              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+            >
+              <span className="text-xl transition-transform group-hover:rotate-12">
+                {theme === 'dark' ? '☀️' : '🌙'}
+              </span>
+              <div className="absolute inset-0 rounded-full bg-cyan-400/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            </button>
+
+            {/* Logout icon button */}
+            <button
+              onClick={handleLogout}
+              title="Sign out"
+              className="glass w-12 h-12 rounded-full flex items-center justify-center border border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:border-red-500/40 hover:shadow-[0_0_20px_rgba(239,68,68,0.2)] hover:scale-110 active:scale-95 transition-all duration-300 group relative"
+            >
+              <div className="absolute inset-0 rounded-full bg-red-500/0 group-hover:bg-red-500/5 transition-colors duration-300"></div>
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-[var(--color-text-dim)] group-hover:text-red-400 transition-colors duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 16.22a6.937 6.937 0 0 1-9.5 0 6.937 6.937 0 0 1 0-9.5" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v9" />
+              </svg>
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Theme Toggle — shown only on login/register when NOT logged in */}
+      {!currentUser && (
+        <button 
+          onClick={toggleTheme}
+          className="fixed top-8 right-8 z-50 glass w-12 h-12 rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-[0_0_20px_rgba(0,0,0,0.3)] border border-white/10 group"
+          title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+        >
+          <span className="text-xl transition-transform group-hover:rotate-12">
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </span>
+          <div className="absolute inset-0 rounded-full bg-cyan-400/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+        </button>
       )}
 
       <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
@@ -547,7 +646,21 @@ const App: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={currentPage === 'login' ? handleLogin : handleRegister} className="space-y-8 relative z-10">
+          <form onSubmit={currentPage === 'login' ? handleLogin : handleRegister} className="space-y-6 relative z-10">
+            {/* Name field — only shown on register */}
+            {currentPage === 'register' && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-top-4 duration-500">
+                <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-cyan-500/70 ml-2">Full Name</label>
+                <input 
+                  type="text" 
+                  required 
+                  value={loginName}
+                  onChange={e => setLoginName(e.target.value)}
+                  className="w-full bg-slate-950/60 border border-white/5 rounded-2xl p-5 outline-none focus:border-cyan-500/50 focus:ring-4 focus:ring-cyan-500/5 transition-all text-white placeholder:text-slate-600 shadow-inner font-medium"
+                  placeholder="John Doe"
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-cyan-500/70 ml-2">Email Address</label>
               <input 
@@ -1178,11 +1291,11 @@ const App: React.FC = () => {
             </div>
             <div className="glass px-6 py-3 rounded-2xl flex items-center gap-4 border-white/5">
               <div className="w-10 h-10 rounded-full bg-blue-500/20 border border-blue-500/30 flex items-center justify-center font-black text-cyan-300 text-xs uppercase">
-                {currentUser?.email?.slice(0, 2) || 'HX'}
+                {currentUser?.name?.slice(0, 2) || currentUser?.email?.slice(0, 2) || 'HX'}
               </div>
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-[var(--color-text-dim)]">Logged in as</p>
-                <p className="text-sm font-black text-white truncate max-w-[160px]">{currentUser?.email || 'Guest'}</p>
+                <p className="text-sm font-black text-white truncate max-w-[160px]">{currentUser?.name || currentUser?.email || 'Guest'}</p>
               </div>
             </div>
           </header>
